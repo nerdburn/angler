@@ -1,0 +1,26 @@
+# Angler configuration
+# Copy to angler.yaml and configure your sources.
+# You can also use environment variables instead of this file.
+
+sources:
+  # Git repository of markdown files
+  - type: git
+    repo_url: https://github.com/yourorg/your-docs.git
+    # github_token: "ghp_..."  # or set GITHUB_TOKEN env var
+
+  # Notion workspace
+  # Create an internal integration at https://www.notion.so/my-integrations
+  # Then share your top-level pages with the integration
+  - type: notion
+    # token: "ntn_..."  # or set NOTION_TOKEN env var
+    # Optionally scope to specific databases (omit to search all shared pages)
+    # databases:
+    #   - "abc123..."
+    #   - "def456..."
+
+  # Google Docs folder
+  # Create a service account and share the folder with its email
+  - type: google_docs
+    folder_id: "1a2b3c..."
+    # credentials_file: "/path/to/service-account.json"
+    # Or set GOOGLE_CREDENTIALS_JSON env var with the JSON contents

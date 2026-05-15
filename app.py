@@ -1,55 +1,20 @@
 import os
-import shutil
 import threading
-import frontmatter
 import chromadb
-from pathlib import Path
-from git import Repo
 from fastapi import FastAPI, Query
 
-app = FastAPI(title="Angler", description="Semantic search for your markdown content")
+from config import load_config
+from sources import SOURCE_TYPES
+
+app = FastAPI(title="Angler", description="Semantic search for your content")
 indexing_status = {"running": False, "error": None}
 
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
-REPO_URL = os.environ.get("REPO_URL", "")
-if GITHUB_TOKEN and REPO_URL and "github.com" in REPO_URL:
-    # Inject token for private repos
-    REPO_URL = REPO_URL.replace(
-        "https://github.com",
-        f"https://x-access-token:{GITHUB_TOKEN}@github.com",
-    )
-REPO_DIR = "/tmp/content-repo"
 CHROMA_DIR = os.environ.get("CHROMA_DIR", "/data/chroma")
-
 client = chromadb.PersistentClient(path=CHROMA_DIR)
 collection = client.get_or_create_collection(
-    name="markdown_content",
+    name="content",
     metadata={"hnsw:space": "cosine"},
 )
-
-
-def clone_or_pull():
-    if not REPO_URL:
-        raise ValueError("REPO_URL environment variable is required")
-    if Path(REPO_DIR).exists():
-        repo = Repo(REPO_DIR)
-        repo.remotes.origin.pull()
-    else:
-        Repo.clone_from(REPO_URL, REPO_DIR)
-
-
-def parse_markdown(file_path: Path) -> dict:
-    post = frontmatter.load(str(file_path))
-    rel_path = str(file_path.relative_to(REPO_DIR))
-    return {
-        "id": rel_path,
-        "content": post.content,
-        "metadata": {
-            "path": rel_path,
-            "title": post.get("title", file_path.stem),
-            **{k: str(v) for k, v in post.metadata.items()},
-        },
-    }
 
 
 def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
@@ -67,9 +32,13 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]
 
 
 def index_all():
-    clone_or_pull()
-    md_files = list(Path(REPO_DIR).rglob("*.md"))
+    config = load_config()
+    sources = config.get("sources", [])
 
+    if not sources:
+        raise ValueError("No sources configured. Set ANGLER_CONFIG or source env vars.")
+
+    # Clear existing index
     existing = collection.count()
     if existing > 0:
         all_ids = collection.get()["ids"]
@@ -79,21 +48,23 @@ def index_all():
     all_docs = []
     all_meta = []
 
-    for md_file in md_files:
-        if any(part.startswith(".") for part in md_file.relative_to(REPO_DIR).parts):
-            continue
+    for source_config in sources:
+        source_type = source_config.get("type")
+        if source_type not in SOURCE_TYPES:
+            raise ValueError(f"Unknown source type: {source_type}")
 
-        parsed = parse_markdown(md_file)
-        if not parsed["content"].strip():
-            continue
+        source = SOURCE_TYPES[source_type](source_config)
+        documents = source.fetch_documents()
 
-        chunks = chunk_text(parsed["content"])
-        for i, chunk in enumerate(chunks):
-            chunk_id = f"{parsed['id']}::chunk_{i}"
-            all_ids.append(chunk_id)
-            all_docs.append(chunk)
-            all_meta.append(parsed["metadata"])
+        for doc in documents:
+            chunks = chunk_text(doc.content)
+            for i, chunk in enumerate(chunks):
+                chunk_id = f"{doc.id}::chunk_{i}"
+                all_ids.append(chunk_id)
+                all_docs.append(chunk)
+                all_meta.append(doc.metadata)
 
+    # ChromaDB has a batch limit
     batch_size = 500
     for i in range(0, len(all_ids), batch_size):
         collection.add(
@@ -117,7 +88,8 @@ def _background_index():
 
 @app.on_event("startup")
 def startup():
-    if collection.count() == 0 and REPO_URL:
+    config = load_config()
+    if collection.count() == 0 and config.get("sources"):
         threading.Thread(target=_background_index, daemon=True).start()
 
 
@@ -125,8 +97,13 @@ def startup():
 def search(
     q: str = Query(..., description="Search query"),
     n: int = Query(10, description="Number of results"),
+    source: str | None = Query(None, description="Filter by source type"),
 ):
-    results = collection.query(query_texts=[q], n_results=n)
+    kwargs = {"query_texts": [q], "n_results": n}
+    if source:
+        kwargs["where"] = {"source": source}
+
+    results = collection.query(**kwargs)
     hits = []
     for i, doc_id in enumerate(results["ids"][0]):
         hits.append(
@@ -148,11 +125,14 @@ def reindex():
 
 @app.get("/health")
 def health():
+    config = load_config()
+    source_types = [s.get("type") for s in config.get("sources", [])]
     status = "indexing" if indexing_status["running"] else "ok"
     if indexing_status["error"]:
         status = "error"
     return {
         "status": status,
+        "sources": source_types,
         "indexed_chunks": collection.count(),
         "error": indexing_status["error"],
     }

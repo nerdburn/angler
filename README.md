@@ -1,33 +1,62 @@
 # Angler
 
-Semantic search for your markdown content. Point it at a git repo full of markdown files and get a search API powered by ChromaDB embeddings.
+Semantic search for your company's content. Connect your markdown repos, Notion workspace, and Google Docs — then search everything with a single API.
 
 ## What it does
 
-Angler clones your markdown repo, chunks the content, generates embeddings, and serves a search API. It finds content by meaning, not just keywords — so searching "what did we discuss about pricing" will find relevant passages even if they never use the word "pricing."
+Angler pulls content from multiple sources, chunks it, generates embeddings, and serves a search API powered by ChromaDB. It finds content by meaning, not just keywords — so searching "what did we discuss about pricing" will find relevant passages even if they never use the word "pricing."
+
+## Sources
+
+| Source | What it indexes | Auth |
+|--------|----------------|------|
+| **Git** | Markdown files from a git repo | GitHub token (for private repos) |
+| **Notion** | Pages and database entries | Internal integration token |
+| **Google Docs** | Documents in a Drive folder | Service account credentials |
 
 ## Quick start
 
-### Environment variables
+### Option 1: Config file
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `REPO_URL` | Yes | Git URL of your markdown repo |
-| `GITHUB_TOKEN` | No | For private GitHub repos |
-| `CHROMA_DIR` | No | Where to persist the index (default: `/data/chroma`) |
-| `PORT` | No | Server port (default: `8000`) |
+Copy `angler.yaml.example` to `angler.yaml` and enable the sources you need:
 
-### Run locally
+```yaml
+sources:
+  - type: git
+    repo_url: https://github.com/yourorg/docs.git
+
+  - type: notion
+    # token set via NOTION_TOKEN env var
+
+  - type: google_docs
+    folder_id: "1a2b3c..."
+```
 
 ```bash
-REPO_URL=https://github.com/yourorg/your-docs.git uvicorn app:app --reload
+pip install -r requirements.txt
+uvicorn app:app --reload
 ```
+
+### Option 2: Environment variables
+
+For simple deployments, skip the config file and use env vars:
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| `REPO_URL` | Git | URL of your markdown repo |
+| `GITHUB_TOKEN` | Git | For private GitHub repos |
+| `NOTION_TOKEN` | Notion | Internal integration token |
+| `NOTION_DATABASES` | Notion | Comma-separated database IDs (optional) |
+| `GOOGLE_DOCS_FOLDER_ID` | Google Docs | Root folder to index |
+| `GOOGLE_CREDENTIALS_JSON` | Google Docs | Service account JSON |
+| `CHROMA_DIR` | — | Where to persist the index (default: `/data/chroma`) |
+| `PORT` | — | Server port (default: `8000`) |
 
 ### Deploy to Railway
 
 1. Fork this repo
 2. Connect it to Railway
-3. Set `REPO_URL` and `GITHUB_TOKEN` (if private) as env vars
+3. Set your source env vars
 4. Railway will use the included `Dockerfile` and `railway.toml`
 
 ## API
@@ -41,10 +70,11 @@ Search your content. Returns ranked results with relevance scores.
   "query": "your query",
   "results": [
     {
-      "id": "docs/meeting-notes.md::chunk_3",
+      "id": "git://docs/meeting-notes.md::chunk_3",
       "score": 0.82,
       "content": "...matching text...",
       "metadata": {
+        "source": "git",
         "path": "docs/meeting-notes.md",
         "title": "Meeting Notes"
       }
@@ -53,21 +83,39 @@ Search your content. Returns ranked results with relevance scores.
 }
 ```
 
+Filter by source type:
+
+```
+GET /search?q=pricing+discussion&source=notion
+```
+
 ### `POST /reindex`
 
-Re-pull the repo and rebuild the index.
+Re-fetch all sources and rebuild the index.
 
 ### `GET /health`
 
-Check service status and index size.
+Check service status, configured sources, and index size.
 
-## How it works
+## Source setup
 
-1. Clones/pulls your git repo on startup
-2. Parses all `.md` files (supports frontmatter metadata)
-3. Chunks text into ~500 char overlapping segments
-4. Stores chunks + embeddings in ChromaDB
-5. Queries use cosine similarity against ChromaDB's default embedding model
+### Git
+
+Just set `REPO_URL`. For private repos, also set `GITHUB_TOKEN`.
+
+### Notion
+
+1. Create an internal integration at [notion.so/my-integrations](https://www.notion.so/my-integrations)
+2. Copy the integration token
+3. Share your top-level workspace pages with the integration (this grants access to all child pages)
+4. Set `NOTION_TOKEN`
+
+### Google Docs
+
+1. Create a service account in Google Cloud Console
+2. Enable the Google Drive and Google Docs APIs
+3. Share your target folder with the service account's email address
+4. Set `GOOGLE_DOCS_FOLDER_ID` and `GOOGLE_CREDENTIALS_JSON`
 
 ## Using with Claude Code
 
@@ -87,7 +135,7 @@ curl -s "https://your-deployment.up.railway.app/search?q=QUERY&n=5" | python3 -m
 \```
 ```
 
-Then use `/search-docs` in Claude Code to search your content.
+Then use `/search-docs` in Claude Code to search your content naturally.
 
 ## License
 
