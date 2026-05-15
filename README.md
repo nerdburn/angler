@@ -1,6 +1,6 @@
 # Angler
 
-Semantic search for your company's content. Connect your markdown repos, Notion workspace, and Google Docs — then search everything with a single API.
+Semantic search for your company's content. Connect your markdown repos, Notion workspace, Google Docs, and Dropbox — then search everything with a single API.
 
 ## What it does
 
@@ -13,6 +13,7 @@ Angler pulls content from multiple sources, chunks it, generates embeddings, and
 | **Git** | Markdown files from a git repo | GitHub token (for private repos) |
 | **Notion** | Pages and database entries | Internal integration token |
 | **Google Docs** | Documents in a Drive folder | Service account credentials |
+| **Dropbox** | Text files in a Dropbox folder | Access token |
 
 ## Quick start
 
@@ -30,6 +31,10 @@ sources:
 
   - type: google_docs
     folder_id: "1a2b3c..."
+
+  - type: dropbox
+    # token set via DROPBOX_TOKEN env var
+    folder_path: "/Documents"  # optional, "" = root
 ```
 
 ```bash
@@ -49,6 +54,8 @@ For simple deployments, skip the config file and use env vars:
 | `NOTION_DATABASES` | Notion | Comma-separated database IDs (optional) |
 | `GOOGLE_DOCS_FOLDER_ID` | Google Docs | Root folder to index |
 | `GOOGLE_CREDENTIALS_JSON` | Google Docs | Service account JSON |
+| `DROPBOX_TOKEN` | Dropbox | App access token |
+| `DROPBOX_FOLDER_PATH` | Dropbox | Folder to index (optional, default: root) |
 | `CHROMA_DIR` | — | Where to persist the index (default: `/data/chroma`) |
 | `PORT` | — | Server port (default: `8000`) |
 
@@ -116,6 +123,14 @@ Just set `REPO_URL`. For private repos, also set `GITHUB_TOKEN`.
 2. Enable the Google Drive and Google Docs APIs
 3. Share your target folder with the service account's email address
 4. Set `GOOGLE_DOCS_FOLDER_ID` and `GOOGLE_CREDENTIALS_JSON`
+
+### Dropbox
+
+1. Create an app at [dropbox.com/developers/apps](https://www.dropbox.com/developers/apps)
+2. Generate an access token
+3. Set `DROPBOX_TOKEN` and optionally `DROPBOX_FOLDER_PATH`
+
+By default it indexes `.md`, `.txt`, `.csv`, `.json`, `.yaml`, `.xml`, `.html`, and `.rtf` files. You can customize this with the `extensions` config option.
 
 ## Using with Claude Code
 

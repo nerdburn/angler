@@ -24,3 +24,12 @@ sources:
     folder_id: "1a2b3c..."
     # credentials_file: "/path/to/service-account.json"
     # Or set GOOGLE_CREDENTIALS_JSON env var with the JSON contents
+
+  # Dropbox folder
+  # Create an app at https://www.dropbox.com/developers/apps
+  - type: dropbox
+    # token: "sl...."  # or set DROPBOX_TOKEN env var
+    # folder_path: "/Documents"  # optional, "" = entire Dropbox
+    # extensions:  # optional, defaults to common text formats
+    #   - ".md"
+    #   - ".txt"

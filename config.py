@@ -32,4 +32,10 @@ def load_config() -> dict:
             "folder_id": os.environ["GOOGLE_DOCS_FOLDER_ID"],
         })
 
+    if os.environ.get("DROPBOX_TOKEN"):
+        source = {"type": "dropbox"}
+        if os.environ.get("DROPBOX_FOLDER_PATH"):
+            source["folder_path"] = os.environ["DROPBOX_FOLDER_PATH"]
+        config["sources"].append(source)
+
     return config
