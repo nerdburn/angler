@@ -1,18 +1,15 @@
+import io
 import os
 import dropbox
+import pymupdf
 from .base import Source, Document
 
 # File extensions we can extract text from
-TEXT_EXTENSIONS = {".md", ".txt", ".csv", ".json", ".yaml", ".yml", ".xml", ".html", ".rtf"}
-
-# Dropbox export formats for Office docs
-EXPORT_FORMATS = {
-    "paper": "markdown",
-}
+TEXT_EXTENSIONS = {".md", ".txt", ".csv", ".json", ".yaml", ".yml", ".xml", ".html", ".rtf", ".pdf"}
 
 
 class DropboxSource(Source):
-    """Index text files from a Dropbox folder."""
+    """Index text and PDF files from a Dropbox folder."""
 
     def __init__(self, config: dict):
         super().__init__(config)
@@ -48,10 +45,31 @@ class DropboxSource(Source):
                 files.append(entry)
         return files
 
-    def _download_text(self, path: str) -> str:
-        """Download a file's content as text."""
+    def _download_bytes(self, path: str) -> bytes:
+        """Download a file's raw content."""
         _, response = self.dbx.files_download(path)
-        return response.content.decode("utf-8", errors="replace")
+        return response.content
+
+    def _extract_text(self, path: str) -> str:
+        """Extract text from a file, handling PDFs and text files."""
+        ext = os.path.splitext(path)[1].lower()
+        raw = self._download_bytes(path)
+
+        if ext == ".pdf":
+            return self._extract_pdf_text(raw)
+
+        return raw.decode("utf-8", errors="replace")
+
+    def _extract_pdf_text(self, data: bytes) -> str:
+        """Extract text from PDF bytes using PyMuPDF."""
+        doc = pymupdf.open(stream=data, filetype="pdf")
+        pages = []
+        for page in doc:
+            text = page.get_text()
+            if text.strip():
+                pages.append(text)
+        doc.close()
+        return "\n\n".join(pages)
 
     def fetch_documents(self) -> list[Document]:
         files = self._list_files(self.folder_path)
@@ -59,7 +77,7 @@ class DropboxSource(Source):
 
         for file in files:
             try:
-                content = self._download_text(file.path_display)
+                content = self._extract_text(file.path_display)
             except Exception:
                 continue
 
