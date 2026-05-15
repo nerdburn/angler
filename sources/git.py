@@ -1,6 +1,7 @@
 import os
-import frontmatter
+from datetime import datetime, timezone
 from pathlib import Path
+import frontmatter
 from git import Repo
 from .base import Source, Document
 
@@ -30,14 +31,19 @@ class GitSource(Source):
         else:
             Repo.clone_from(self.repo_url, self.repo_dir)
 
-    def fetch_documents(self) -> list[Document]:
+    def fetch_documents(self, since: datetime | None = None) -> list[Document]:
         self._clone_or_pull()
         documents = []
 
         for md_file in Path(self.repo_dir).rglob("*.md"):
-            # Skip dotfiles/dirs
             if any(part.startswith(".") for part in md_file.relative_to(self.repo_dir).parts):
                 continue
+
+            # Check file modification time for incremental indexing
+            if since:
+                mtime = datetime.fromtimestamp(md_file.stat().st_mtime, tz=timezone.utc)
+                if mtime <= since:
+                    continue
 
             post = frontmatter.load(str(md_file))
             if not post.content.strip():

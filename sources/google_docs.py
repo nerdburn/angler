@@ -1,5 +1,6 @@
 import os
 import json
+from datetime import datetime
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from .base import Source, Document
@@ -24,7 +25,6 @@ class GoogleDocsSource(Source):
         self.docs = build("docs", "v1", credentials=creds)
 
     def _get_credentials(self, config: dict):
-        """Load credentials from file path or JSON env var."""
         creds_file = config.get("credentials_file", os.environ.get("GOOGLE_CREDENTIALS_FILE", ""))
         creds_json = config.get("credentials_json", os.environ.get("GOOGLE_CREDENTIALS_JSON", ""))
 
@@ -38,14 +38,18 @@ class GoogleDocsSource(Source):
                 "Google Docs source requires credentials_file or GOOGLE_CREDENTIALS_JSON env var"
             )
 
-    def _list_docs(self, folder_id: str) -> list[dict]:
-        """Recursively list all Google Docs in a folder."""
+    def _list_docs(self, folder_id: str, since: datetime | None = None) -> list[dict]:
+        """Recursively list Google Docs in a folder, optionally filtered by modified time."""
         docs = []
         page_token = None
 
+        q = f"'{folder_id}' in parents and trashed = false"
+        if since:
+            q += f" and modifiedTime > '{since.isoformat()}'"
+
         while True:
             response = self.drive.files().list(
-                q=f"'{folder_id}' in parents and trashed = false",
+                q=q,
                 fields="nextPageToken, files(id, name, mimeType, modifiedTime, webViewLink)",
                 pageSize=100,
                 pageToken=page_token,
@@ -55,8 +59,7 @@ class GoogleDocsSource(Source):
                 if file["mimeType"] == "application/vnd.google-apps.document":
                     docs.append(file)
                 elif file["mimeType"] == "application/vnd.google-apps.folder":
-                    # Recurse into subfolders
-                    docs.extend(self._list_docs(file["id"]))
+                    docs.extend(self._list_docs(file["id"], since))
 
             page_token = response.get("nextPageToken")
             if not page_token:
@@ -65,7 +68,6 @@ class GoogleDocsSource(Source):
         return docs
 
     def _get_doc_text(self, doc_id: str) -> str:
-        """Export a Google Doc as plain text."""
         content = self.drive.files().export(
             fileId=doc_id,
             mimeType="text/plain",
@@ -75,8 +77,8 @@ class GoogleDocsSource(Source):
             return content.decode("utf-8")
         return str(content)
 
-    def fetch_documents(self) -> list[Document]:
-        docs = self._list_docs(self.folder_id)
+    def fetch_documents(self, since: datetime | None = None) -> list[Document]:
+        docs = self._list_docs(self.folder_id, since)
         documents = []
 
         for doc in docs:

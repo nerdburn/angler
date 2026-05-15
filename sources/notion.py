@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from notion_client import Client
 from .base import Source, Document
 
@@ -30,7 +31,6 @@ class NotionSource(Source):
                 block_type = block["type"]
                 block_data = block.get(block_type, {})
 
-                # Extract rich_text from common block types
                 rich_text = block_data.get("rich_text", [])
                 line = "".join(rt.get("plain_text", "") for rt in rich_text)
 
@@ -48,13 +48,11 @@ class NotionSource(Source):
                 elif block_type == "divider":
                     line = "---"
                 elif block_type in ("child_page", "child_database"):
-                    # Don't recurse into child pages — they'll be indexed separately
                     continue
 
                 if line.strip():
                     text_parts.append(line)
 
-                # Recurse into blocks that have children
                 if block.get("has_children") and block_type not in ("child_page", "child_database"):
                     child_text = self._blocks_to_text(block["id"])
                     if child_text.strip():
@@ -67,7 +65,6 @@ class NotionSource(Source):
         return "\n".join(text_parts)
 
     def _get_page_title(self, page: dict) -> str:
-        """Extract title from a Notion page object."""
         props = page.get("properties", {})
         for prop in props.values():
             if prop["type"] == "title":
@@ -79,19 +76,34 @@ class NotionSource(Source):
     def _get_page_url(self, page: dict) -> str:
         return page.get("url", "")
 
-    def _fetch_from_search(self) -> list[Document]:
-        """Fetch all pages the integration has access to."""
+    def _is_modified_since(self, page: dict, since: datetime) -> bool:
+        edited = page.get("last_edited_time", "")
+        if not edited:
+            return True
+        edited_dt = datetime.fromisoformat(edited.replace("Z", "+00:00"))
+        return edited_dt > since
+
+    def _fetch_from_search(self, since: datetime | None = None) -> list[Document]:
         documents = []
         cursor = None
 
+        kwargs = {
+            "filter": {"property": "object", "value": "page"},
+            "page_size": 100,
+            "sort": {"direction": "descending", "timestamp": "last_edited_time"},
+        }
+
         while True:
-            response = self.client.search(
-                filter={"property": "object", "value": "page"},
-                start_cursor=cursor,
-                page_size=100,
-            )
+            if cursor:
+                kwargs["start_cursor"] = cursor
+
+            response = self.client.search(**kwargs)
 
             for page in response["results"]:
+                # With descending sort, once we hit a page older than `since`, we can stop
+                if since and not self._is_modified_since(page, since):
+                    return documents
+
                 doc = self._page_to_document(page)
                 if doc:
                     documents.append(doc)
@@ -102,18 +114,24 @@ class NotionSource(Source):
 
         return documents
 
-    def _fetch_from_databases(self) -> list[Document]:
-        """Fetch all pages from specific databases."""
+    def _fetch_from_databases(self, since: datetime | None = None) -> list[Document]:
         documents = []
 
         for db_id in self.database_ids:
             cursor = None
+            kwargs = {"database_id": db_id, "page_size": 100}
+
+            if since:
+                kwargs["filter"] = {
+                    "timestamp": "last_edited_time",
+                    "last_edited_time": {"after": since.isoformat()},
+                }
+
             while True:
-                response = self.client.databases.query(
-                    database_id=db_id,
-                    start_cursor=cursor,
-                    page_size=100,
-                )
+                if cursor:
+                    kwargs["start_cursor"] = cursor
+
+                response = self.client.databases.query(**kwargs)
 
                 for page in response["results"]:
                     doc = self._page_to_document(page)
@@ -127,7 +145,6 @@ class NotionSource(Source):
         return documents
 
     def _page_to_document(self, page: dict) -> Document | None:
-        """Convert a Notion page to a Document."""
         page_id = page["id"]
         title = self._get_page_title(page)
         content = self._blocks_to_text(page_id)
@@ -146,7 +163,7 @@ class NotionSource(Source):
             },
         )
 
-    def fetch_documents(self) -> list[Document]:
+    def fetch_documents(self, since: datetime | None = None) -> list[Document]:
         if self.database_ids:
-            return self._fetch_from_databases()
-        return self._fetch_from_search()
+            return self._fetch_from_databases(since)
+        return self._fetch_from_search(since)

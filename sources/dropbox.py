@@ -1,10 +1,9 @@
-import io
 import os
+from datetime import datetime, timezone
 import dropbox
 import pymupdf
 from .base import Source, Document
 
-# File extensions we can extract text from
 TEXT_EXTENSIONS = {".md", ".txt", ".csv", ".json", ".yaml", ".yml", ".xml", ".html", ".rtf", ".pdf"}
 
 
@@ -21,37 +20,40 @@ class DropboxSource(Source):
         self.folder_path = config.get("folder_path", "")  # "" = root
         self.extensions = set(config.get("extensions", TEXT_EXTENSIONS))
 
-    def _list_files(self, path: str) -> list[dropbox.files.FileMetadata]:
+    def _list_files(self, path: str, since: datetime | None = None) -> list[dropbox.files.FileMetadata]:
         """Recursively list all files in a Dropbox folder."""
         files = []
 
         result = self.dbx.files_list_folder(path, recursive=True)
-        files.extend(self._collect_files(result))
+        files.extend(self._collect_files(result, since))
 
         while result.has_more:
             result = self.dbx.files_list_folder_continue(result.cursor)
-            files.extend(self._collect_files(result))
+            files.extend(self._collect_files(result, since))
 
         return files
 
-    def _collect_files(self, result) -> list[dropbox.files.FileMetadata]:
+    def _collect_files(self, result, since: datetime | None = None) -> list[dropbox.files.FileMetadata]:
         """Filter list results to only indexable files."""
         files = []
         for entry in result.entries:
             if not isinstance(entry, dropbox.files.FileMetadata):
                 continue
             ext = os.path.splitext(entry.name)[1].lower()
-            if ext in self.extensions:
-                files.append(entry)
+            if ext not in self.extensions:
+                continue
+            if since:
+                modified = entry.server_modified.replace(tzinfo=timezone.utc)
+                if modified <= since:
+                    continue
+            files.append(entry)
         return files
 
     def _download_bytes(self, path: str) -> bytes:
-        """Download a file's raw content."""
         _, response = self.dbx.files_download(path)
         return response.content
 
     def _extract_text(self, path: str) -> str:
-        """Extract text from a file, handling PDFs and text files."""
         ext = os.path.splitext(path)[1].lower()
         raw = self._download_bytes(path)
 
@@ -61,7 +63,6 @@ class DropboxSource(Source):
         return raw.decode("utf-8", errors="replace")
 
     def _extract_pdf_text(self, data: bytes) -> str:
-        """Extract text from PDF bytes using PyMuPDF."""
         doc = pymupdf.open(stream=data, filetype="pdf")
         pages = []
         for page in doc:
@@ -71,8 +72,8 @@ class DropboxSource(Source):
         doc.close()
         return "\n\n".join(pages)
 
-    def fetch_documents(self) -> list[Document]:
-        files = self._list_files(self.folder_path)
+    def fetch_documents(self, since: datetime | None = None) -> list[Document]:
+        files = self._list_files(self.folder_path, since)
         documents = []
 
         for file in files:
