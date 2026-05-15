@@ -33,3 +33,23 @@ sources:
     # extensions:  # optional, defaults to common text formats
     #   - ".md"
     #   - ".txt"
+
+  # SQLite database
+  - type: sqlite
+    db_path: "~/agency/agency.db"
+    tables:
+      - table: employees
+        text_columns: [name, role, notes, department, position]
+        id_column: id
+        updated_column: updated_at
+      - table: clients
+        text_columns: [name, website, notes]
+        id_column: id
+        updated_column: updated_at
+      - table: projects
+        text_columns: [name, notes, billing_type, slug]
+        id_column: id
+        updated_column: updated_at
+      - table: industries
+        text_columns: [name, keywords]
+        id_column: id

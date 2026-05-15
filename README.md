@@ -14,6 +14,7 @@ Angler pulls content from multiple sources, chunks it, generates embeddings, and
 | **Notion** | Pages and database entries | Internal integration token |
 | **Google Docs** | Documents in a Drive folder | Service account credentials |
 | **Dropbox** | Text files in a Dropbox folder | Access token |
+| **SQLite** | Rows from SQLite tables | File path to `.db` |
 
 ## Quick start
 
@@ -35,6 +36,14 @@ sources:
   - type: dropbox
     # token set via DROPBOX_TOKEN env var
     folder_path: "/Documents"  # optional, "" = root
+
+  - type: sqlite
+    db_path: "~/agency/agency.db"
+    tables:
+      - table: employees
+        text_columns: [name, role, notes]
+        id_column: id
+        updated_column: updated_at
 ```
 
 ```bash
@@ -56,6 +65,8 @@ For simple deployments, skip the config file and use env vars:
 | `GOOGLE_CREDENTIALS_JSON` | Google Docs | Service account JSON |
 | `DROPBOX_TOKEN` | Dropbox | App access token |
 | `DROPBOX_FOLDER_PATH` | Dropbox | Folder to index (optional, default: root) |
+| `SQLITE_DB_PATH` | SQLite | Path to `.db` file |
+| `SQLITE_TABLES` | SQLite | JSON array of table configs (see below) |
 | `CHROMA_DIR` | — | Where to persist the index (default: `/data/chroma`) |
 | `PORT` | — | Server port (default: `8000`) |
 
@@ -131,6 +142,25 @@ Just set `REPO_URL`. For private repos, also set `GITHUB_TOKEN`.
 3. Set `DROPBOX_TOKEN` and optionally `DROPBOX_FOLDER_PATH`
 
 By default it indexes `.md`, `.txt`, `.csv`, `.json`, `.yaml`, `.xml`, `.html`, and `.rtf` files. You can customize this with the `extensions` config option.
+
+### SQLite
+
+Point Angler at any SQLite database and tell it which tables and columns to index:
+
+```yaml
+- type: sqlite
+  db_path: "~/agency/agency.db"
+  tables:
+    - table: employees
+      text_columns: [name, role, notes]
+      id_column: id            # default: rowid
+      updated_column: updated_at  # optional, enables incremental indexing
+    - table: projects
+      text_columns: [name, notes]
+      id_column: id
+```
+
+Each row becomes a document with the text columns concatenated. The `updated_column` is optional — if provided, incremental reindexing will only fetch rows modified since the last run.
 
 ## Using with Claude Code
 

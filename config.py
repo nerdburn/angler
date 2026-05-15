@@ -38,4 +38,11 @@ def load_config() -> dict:
             source["folder_path"] = os.environ["DROPBOX_FOLDER_PATH"]
         config["sources"].append(source)
 
+    if os.environ.get("SQLITE_DB_PATH"):
+        source = {"type": "sqlite", "db_path": os.environ["SQLITE_DB_PATH"]}
+        if os.environ.get("SQLITE_TABLES"):
+            import json
+            source["tables"] = json.loads(os.environ["SQLITE_TABLES"])
+        config["sources"].append(source)
+
     return config
